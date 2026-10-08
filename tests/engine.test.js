@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {searchSampleFares,filterFares,parseTrip,validateQuery,indiaToday,addDays} from '../dist/engine.js';
+const q={from:'Bengaluru',to:'Chennai',date:addDays(indiaToday(),1),travellers:2};
+test('group totals and whole-vehicle pricing',()=>{const f=searchSampleFares(q);assert.equal(f.find(x=>x.id==='rail-saver').total,1048);assert.equal(f.find(x=>x.id==='cab-sedan').total,4655);for(const x of f)assert.equal(x.total,x.base+x.tax+x.fee)});
+test('filters respect price, status, mode and capacity',()=>{const f=searchSampleFares(q);assert.ok(filterFares(f).every(x=>x.status==='confirmed'));assert.ok(filterFares(f,{budget:1100,mode:'train'}).every(x=>x.total<=1100&&x.mode==='train'));assert.ok(!searchSampleFares({...q,travellers:5}).some(x=>x.id==='cab-sedan'));assert.equal(filterFares(f,{sort:'duration'})[0].mode,'flight');assert.equal(filterFares(f,{budget:1}).length,0)});
+test('route coverage is explicit',()=>{assert.equal(searchSampleFares({...q,from:'Mumbai',to:'Chennai'}).length,0);assert.equal(searchSampleFares({...q,from:'Chennai',to:'Bengaluru'}).length,searchSampleFares(q).length);assert.ok(!searchSampleFares({...q,from:'Mumbai',to:'Pune'}).some(x=>x.mode==='flight'))});
+test('invalid inputs are rejected',()=>{for(const x of [{...q,from:q.to},{...q,date:'2026-02-30'},{...q,date:'2020-01-01'},{...q,travellers:0},{...q,travellers:7},{...q,from:'Atlantis'}])assert.throws(()=>validateQuery(x))});
+test('trip parser applies supported constraints',()=>{const result=parseTrip('Bengaluru to Chennai tomorrow for 2 people under ₹2,500',q);assert.equal(result.query.from,'Bengaluru');assert.equal(result.query.to,'Chennai');assert.equal(result.query.travellers,2);assert.equal(result.budget,2500);assert.equal(result.query.date,addDays(indiaToday(),1))});
+test('unsupported trip conditions fail explicitly',()=>{for(const prompt of ['Bengaluru to Chennai arriving before 10am','London to Paris','hello','Bengaluru to Chennai for 9 people'])assert.throws(()=>parseTrip(prompt,q))});
