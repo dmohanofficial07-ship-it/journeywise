@@ -2,6 +2,25 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-const root=path.join(path.dirname(fileURLToPath(import.meta.url)),'dist');
+import app from './server/app.js';
+const root=path.join(path.dirname(fileURLToPath(import.meta.url)),'public');
 const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.jpg':'image/jpeg','.svg':'image/svg+xml'};
-http.createServer(async(req,res)=>{try{const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return}const body=await fs.readFile(file);res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});res.end(body)}catch{res.writeHead(404);res.end('Not found')}}).listen(4173,'127.0.0.1',()=>console.log('Farewise: http://127.0.0.1:4173'));
+const port=Number(process.env.PORT||4173);
+const server=http.createServer(async(req,res)=>{
+  try{
+    const origin='http://127.0.0.1:'+port;const url=new URL(req.url,origin);
+    if(url.pathname.startsWith('/api/')){
+      let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>8192){res.writeHead(413,{'Content-Type':'application/json'});res.end(JSON.stringify({error:{code:'PAYLOAD_TOO_LARGE',message:'The request is too large.'}}));return;}chunks.push(chunk);}
+      const headers=new Headers();for(const [key,value] of Object.entries(req.headers))if(value)headers.set(key,Array.isArray(value)?value.join(','):value);
+      headers.set('CF-Connecting-IP',req.socket.remoteAddress||'local');
+      const request=new Request(url,{method:req.method,headers,body:['GET','HEAD'].includes(req.method)?undefined:Buffer.concat(chunks)});
+      const response=await app.fetch(request,process.env);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));return;
+    }
+    if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);res.end();return;}
+    const pathname=decodeURIComponent(url.pathname);const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));
+    if(!file.startsWith(root+path.sep)){res.writeHead(403);res.end();return;}
+    const body=await fs.readFile(file);res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:body);
+  }catch{res.writeHead(404);res.end('Not found');}
+});
+server.listen(port,'127.0.0.1',()=>console.log('Travel search: http://127.0.0.1:'+port));
+for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>process.exit(0)));

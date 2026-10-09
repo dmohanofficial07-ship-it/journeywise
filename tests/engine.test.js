@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {searchSampleFares,filterFares,parseTrip,validateQuery,indiaToday,addDays} from '../dist/engine.js';
+import {searchSampleFares,filterFares,parseTrip,validateQuery,indiaToday,addDays} from '../public/engine.js';
 const q={from:'Bengaluru',to:'Chennai',date:addDays(indiaToday(),1),travellers:2};
 test('group totals and whole-vehicle pricing',()=>{const f=searchSampleFares(q);assert.equal(f.find(x=>x.id==='rail-saver').total,1048);assert.equal(f.find(x=>x.id==='cab-sedan').total,4655);for(const x of f)assert.equal(x.total,x.base+x.tax+x.fee)});
 test('filters respect price, status, mode and capacity',()=>{const f=searchSampleFares(q);assert.ok(filterFares(f).every(x=>x.status==='confirmed'));assert.ok(filterFares(f,{budget:1100,mode:'train'}).every(x=>x.total<=1100&&x.mode==='train'));assert.ok(!searchSampleFares({...q,travellers:5}).some(x=>x.id==='cab-sedan'));assert.equal(filterFares(f,{sort:'duration'})[0].mode,'flight');assert.equal(filterFares(f,{budget:1}).length,0)});
