@@ -65,6 +65,7 @@ export function createDuffel(env,{fetchImpl=fetch,now=()=>Date.now(),timeoutMs=1
       if(data.offers.length>500)excluded.limit=data.offers.length-500;
       return {offers,excluded,checkedAt:new Date(checked).toISOString(),dataMode:config.mode};
     },
+    async bookingOffer(id,query){const config=requireProvider(env);if(!/^off_[A-Za-z0-9]+$/.test(id))throw new ApiError(400,'INVALID_OFFER_REFERENCE','Invalid offer reference.');const raw=await request('/air/offers/'+encodeURIComponent(id)+'?return_available_services=true');if(raw.id!==id)throw new ApiError(502,'PROVIDER_INVALID_RESPONSE','The provider returned a different offer.');const result=normalizeDuffelOffer(raw,query,config.mode,now());if(!result.offer)throw new ApiError(410,'OFFER_UNAVAILABLE','This offer is no longer available. Search again.');return {raw,offer:result.offer};},
     async refresh(id,query){if(!/^off_[A-Za-z0-9]+$/.test(id))throw new ApiError(400,'INVALID_OFFER_REFERENCE','Invalid offer reference.');const config=requireProvider(env);const data=await request('/air/offers/'+encodeURIComponent(id)+'?return_available_services=true');if(data.id!==id)throw new ApiError(502,'PROVIDER_INVALID_RESPONSE','The provider returned a different offer.');const result=normalizeDuffelOffer(data,query,config.mode,now());if(!result.offer)throw new ApiError(410,'OFFER_UNAVAILABLE','This offer is no longer suitable or has expired. Search again.');return result.offer;}
   };
 }

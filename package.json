@@ -9,9 +9,11 @@
     "build": "node scripts/build.mjs"
   },
   "devDependencies": {
+    "drizzle-kit": "^0.31.11",
+    "drizzle-orm": "^0.45.4",
     "esbuild": "^0.28.2"
   },
   "engines": {
-    "node": ">=22.9.0"
+    "node": ">=24.0.0"
   }
 }

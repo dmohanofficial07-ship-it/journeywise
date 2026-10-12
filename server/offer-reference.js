@@ -13,3 +13,7 @@ export async function verifyReference(reference,secret,now=Date.now()){
     return p;
   }catch(e){if(e instanceof ApiError)throw e;throw invalid();}
 }
+
+export async function verifySignedPayload(reference,secret){
+  try{if(typeof reference!=='string'||reference.length>8192||! /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(reference))throw Error();const [body,signature]=reference.split('.');if(!await crypto.subtle.verify('HMAC',await key(secret),decode(signature),encoder.encode(body)))throw Error();return JSON.parse(new TextDecoder().decode(decode(body)));}catch{throw new ApiError(400,'INVALID_CHECKOUT','Invalid booking session. Review the flight again.')}
+}

@@ -1,3 +1,4 @@
+import {createBookingService,sandboxBookingEnabled} from './booking.js';
 import {ApiError,readJson} from './errors.js';
 import {validateSearch,providerConfig,requireProvider,airports} from './query.js';
 import {searchSampleFares} from '../public/engine.js';
@@ -5,7 +6,7 @@ import {createDuffel} from './providers/duffel.js';
 import {signReference,verifyReference} from './offer-reference.js';
 const security={'Content-Type':'application/json; charset=utf-8','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'};
 function json(value,status=200,headers={}){return new Response(JSON.stringify(value),{status,headers:{...security,...headers}});}
-export function createApp({fetchImpl=fetch,now=()=>Date.now(),timeoutMs=18000,rateLimit=20}={}){
+export function createApp({fetchImpl=fetch,now=()=>Date.now(),timeoutMs=18000,rateLimit=20,bookingTimeoutMs=45000}={}){
   // Per-instance burst protection. A public launch also requires a distributed gateway limit.
   const buckets=new Map();
   function limit(request){const id=request.headers.get('CF-Connecting-IP')||'local';const time=now();for(const [key,bucket] of buckets)if(bucket.until<=time)buckets.delete(key);if(!buckets.has(id)){if(buckets.size>=10000)throw new ApiError(429,'RATE_LIMITED','Too many requests. Please wait a minute.');buckets.set(id,{count:0,until:time+60000});}if(++buckets.get(id).count>rateLimit)throw new ApiError(429,'RATE_LIMITED','Too many requests. Please wait a minute.');}
@@ -15,12 +16,13 @@ export function createApp({fetchImpl=fetch,now=()=>Date.now(),timeoutMs=18000,ra
     try{
       const url=new URL(request.url);
       if(url.pathname==='/api/health'&&request.method==='GET')return json({status:'ok',service:'travel-search',version:'0.2.0'});
-      if(url.pathname==='/api/providers'&&request.method==='GET')return json({providers:[{id:'sample',name:'Illustrative samples',enabled:true,mode:'sample',bookingEnabled:false},providerConfig(env)],airports,bookingEnabled:false});
-      if(!['/api/search','/api/offers/refresh'].includes(url.pathname))throw new ApiError(404,'NOT_FOUND','This endpoint does not exist.');
+      if(url.pathname==='/api/providers'&&request.method==='GET')return json({providers:[{id:'sample',name:'Illustrative samples',enabled:true,mode:'sample',bookingEnabled:false},{...providerConfig(env),sandboxBookingEnabled:sandboxBookingEnabled(env)}],airports,bookingEnabled:false,sandboxBookingEnabled:sandboxBookingEnabled(env)});
+      if(!['/api/search','/api/offers/refresh','/api/bookings/prepare','/api/bookings/confirm','/api/bookings/status'].includes(url.pathname))throw new ApiError(404,'NOT_FOUND','This endpoint does not exist.');
       if(request.method!=='POST')return json({error:{code:'METHOD_NOT_ALLOWED',message:'Use POST for this endpoint.'},requestId},405,{Allow:'POST'});
       if(request.headers.get('sec-fetch-site')==='cross-site'||(request.headers.get('origin')&&request.headers.get('origin')!==url.origin))throw new ApiError(403,'ORIGIN_NOT_ALLOWED','This request must come from the application.');
       if(request.headers.get('content-type')?.split(';')[0].trim()!=='application/json')throw new ApiError(415,'UNSUPPORTED_CONTENT_TYPE','Use application/json.');
       limit(request);const body=await readJson(request);
+      if(url.pathname.startsWith('/api/bookings/')){const service=createBookingService(env,{fetchImpl,now,timeoutMs:bookingTimeoutMs});const action=url.pathname.split('/').at(-1);const result=await service[action](body);return json({requestId,...result},result.status==='unknown'?202:200);}
       if(url.pathname==='/api/search'){
         const query=validateSearch(body,new Date(now()));const checkedAt=new Date(now()).toISOString();
         if(query.source==='sample'){const offers=searchSampleFares(query).map(o=>({...o,currency:'INR',totalMinor:o.total*100,dataMode:'sample',sourceProvider:'Sample data',checkedAt,expiresAt:null,bookingEnabled:false,priceComplete:true}));return json({requestId,query,dataMode:'sample',checkedAt,offers,providers:[{id:'sample',status:'ok',offerCount:offers.length}],excluded:{},warnings:['Illustrative fares and availability; no provider was contacted.']});}

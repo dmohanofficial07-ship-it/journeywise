@@ -5,7 +5,7 @@ import {build} from 'esbuild';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const out=path.resolve(root,'dist');
 if(path.dirname(out)!==root||path.basename(out)!=='dist')throw new Error('Unsafe build output path.');
-const names=['index.html','style.css','app.js','engine.js'];
+const names=['index.html','style.css','app.js','engine.js','booking.js'];
 for(const name of names)await fs.access(path.join(root,'public',name));
 await fs.mkdir(path.join(root,'.sites-runtime'),{recursive:true});
 const types={html:'text/html; charset=utf-8',css:'text/css; charset=utf-8',js:'text/javascript; charset=utf-8'};

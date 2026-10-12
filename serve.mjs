@@ -1,3 +1,4 @@
+import {openLocalDB} from './server/local-db.js';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -6,6 +7,8 @@ import app from './server/app.js';
 const root=path.join(path.dirname(fileURLToPath(import.meta.url)),'public');
 const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.jpg':'image/jpeg','.svg':'image/svg+xml'};
 const port=Number(process.env.PORT||4173);
+const DB=await openLocalDB(path.join(path.dirname(fileURLToPath(import.meta.url)),'.local-data','bookings.sqlite'));
+const env={...process.env,DB};
 const server=http.createServer(async(req,res)=>{
   try{
     const origin='http://127.0.0.1:'+port;const url=new URL(req.url,origin);
@@ -14,7 +17,7 @@ const server=http.createServer(async(req,res)=>{
       const headers=new Headers();for(const [key,value] of Object.entries(req.headers))if(value)headers.set(key,Array.isArray(value)?value.join(','):value);
       headers.set('CF-Connecting-IP',req.socket.remoteAddress||'local');
       const request=new Request(url,{method:req.method,headers,body:['GET','HEAD'].includes(req.method)?undefined:Buffer.concat(chunks)});
-      const response=await app.fetch(request,process.env);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));return;
+      const response=await app.fetch(request,env);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));return;
     }
     if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);res.end();return;}
     const pathname=decodeURIComponent(url.pathname);const file=path.resolve(root,'.'+(pathname==='/'?'/index.html':pathname));

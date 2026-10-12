@@ -1,4 +1,4 @@
-# Project Rev — travel search milestone
+# Project Rev — sandbox flight booking
 
 Working product name. The original private Sites URL is retained until a final brand is chosen.
 
@@ -16,11 +16,14 @@ Working product name. The original private Sites URL is retained until a final b
 - Request validation, small-body limits, provider timeout, same-origin browser checks and per-instance burst limits.
 - A deployable Cloudflare-compatible Worker using the same backend as the local server.
 
-**Not implemented:** customer accounts, payment collection, ticket booking/issuance, live bus/train/cab adapters, background monitoring, or an LLM. The trip text helper remains rule-based. No endpoint creates an order or charges money.
+- Sandbox checkout with passenger validation, refreshed price review, explicit confirmation, a test booking reference and status recovery.
+- Durable booking attempts: local SQLite and hosted D1. A unique offer claim is saved before an order POST. Ambiguous results are reconciled through order reads, never automatically resubmitted.
+
+**Not implemented:** customer accounts, real payment collection, live ticket booking/issuance, live bus/train/cab adapters, background monitoring, or an LLM. The trip text helper remains rule-based. Order creation is restricted to test tokens and sandbox mode.
 
 ## Run locally
 
-Use Node.js 22.9+ (Node 24 recommended for the scripts).
+Use Node.js 24 for the local SQLite-backed server and scripts.
 
     npm ci
     npm start
@@ -43,11 +46,12 @@ The build creates dist/server/index.js and deployment assets. Do not edit dist: 
 
 5. Keep ENABLE_LIVE_SEARCH=false.
 6. Restart npm start and select “Provider flights · Duffel”.
-7. Search, open an offer and use “Refresh supplier quote”. Test inventory must remain labelled as test quotes.
+7. To enable test bookings, set ENABLE_SANDBOX_BOOKING=true and restart. A test token with read/write access and durable storage are required. Local storage is initialized from the checked-in migrations at startup.
+8. Search, open Fare details, choose Continue to test booking, then Fill test details. Review the details and tick the confirmation box before confirming. Use fictional passenger details; no card is collected or charged.
 
 Do not paste tokens into chat, browser code or GitHub. The signing secret protects quote references; rotate it to invalidate outstanding references. Tokens contain route/count/price metadata, never passenger identities or supplier credentials. Do not add personal data to them.
 
-No credentialed Duffel API call has been performed as part of this milestone. Tests use controlled provider fixtures. The adapter is implemented but must be validated against your actual sandbox account.
+Credentialed sandbox search, quote refresh and one complete test booking have been verified. The browser test also recovered the same confirmation after reload. Live booking remains disabled regardless of the live-search flag.
 
 ## Production search (later)
 
@@ -67,7 +71,7 @@ Reports service/version readiness, not provider connectivity.
 
 ### GET /api/providers
 
-Returns public provider configuration, supported city/airport codes and bookingEnabled=false. No token or signing secret is returned. “ready” means configured, not that a successful supplier request has been verified.
+Returns public provider configuration, supported city/airport codes, bookingEnabled=false for real bookings, and a separate sandboxBookingEnabled flag. No token or signing secret is returned. “ready” means configured, not that a successful supplier request has been verified.
 
 ### POST /api/search
 
@@ -114,15 +118,31 @@ Refreshes the precise offer server-side. The reference binds the provider ID, qu
 
 The Worker embeds text assets and serves the credited photograph from the platform asset binding where available, with a Wikimedia redirect fallback. No dependency on local disk at runtime.
 
+## Sandbox booking API and persistence
+
+- POST /api/bookings/prepare: accepts a signed offer reference and one passenger object per adult. Refreshes the offer and returns the review quote and a signed checkoutToken. This does not create an order.
+- POST /api/bookings/confirm: accepts checkoutToken, the same passengers and confirmed=true. Rechecks price, itinerary and fare conditions. Changes require another review. Uses only Duffel's simulated balance and server-derived passenger IDs/amounts.
+- POST /api/bookings/status: accepts checkoutToken and returns not_submitted, unknown, rejected or confirmed. A confirmed result contains the booking reference and full supported itinerary. Unknown results never trigger another POST; check status or investigate the test order in the Duffel dashboard.
+
+Passenger fields are given_name, family_name, title (mr/ms/mrs/miss/dr), gender (m/f), born_on (YYYY-MM-DD), email and phone_number (international format). Only adults aged 18–120 on departure are supported. Offers requiring identity documents are not supported yet. No identity documents or cards are collected.
+
+Checkout reviews expire after five minutes or at offer expiry, whichever is sooner. Recovery tokens last seven days. They contain a passenger digest, not names/contact details. Passenger details stay in page memory and go to Duffel's sandbox only when confirming; they are not stored in our booking database. The database retains the attempt, state and confirmation without names/contact details. A tab-local recovery token in sessionStorage provides access to the last attempt; it is not an account or cross-device history. Closing the tab can lose this recovery handle; the test order remains in Duffel.
+
+Local SQLite is in ignored .local-data/bookings.sqlite. Do not delete it to retry an uncertain booking. Hosted D1 uses the DB binding and checked-in Drizzle migrations. Generate schema changes with `node node_modules/drizzle-kit/bin.cjs generate`; local startup applies pending migrations. Keep applied migrations immutable. Local and hosted databases are separate.
+
+The hosted site does not inherit .env. Sandbox booking remains disabled there until its own test token, signing secret and ENABLE_SANDBOX_BOOKING=true are securely configured. Keep the site owner-private: recovery tokens are bearer capabilities, and public accounts/ownership checks, distributed quotas, operational reconciliation and webhook processing are future work.
+
 ## Next milestone
 
-Validate real sandbox access. Then implement traveller accounts and a user-approved booking flow with supplier settlement/payment design, idempotent booking attempts, reconciliation and cancellation/refund handling. Do not enable automatic booking before these exist.
+Add traveller accounts and booking ownership, then cancellation/refund handling and a real payment/settlement design. Complete reliability and operational checks before enabling real bookings or any automatic booking.
 
 ## Official integration references
 
 - https://duffel.com/docs/api/offer-requests
 - https://duffel.com/docs/api/offers
 - https://duffel.com/docs/api/overview/welcome
+- https://duffel.com/docs/api/v2/orders
+- https://duffel.com/docs/api/overview/response-handling
 
 ## Photo attribution
 
@@ -133,4 +153,4 @@ The original is retained in public/konkan-railway.jpg and displayed cropped. Att
 
 ## Milestone verification
 
-22 automated engine/API tests passed, covering monetary precision, group totals, missing access, environment separation, timeouts, offer expiry, signed references, changed prices and request boundaries. Browser checks covered sample search and provider-unavailable handling, mobile layout, controlled supplier quote fixtures, currencies, refresh errors and stale-response protection. No credentialed supplier call was made. WebMCP actions were exercised with an instrumented registry; native WebMCP validation was unavailable in standard Chrome.
+Automated engine, API and booking tests cover monetary precision, group totals, missing access, environment separation, offer expiry, signed references, changed prices, passenger validation, explicit consent, concurrent confirmation, durable attempt reuse, ambiguous response recovery and storage failures. Browser checks cover mobile checkout, form validation, editing passengers, sandbox confirmation and recovery after reload. Credentialed supplier checks used test mode only. WebMCP search was previously exercised with an instrumented registry; native WebMCP validation was unavailable in standard Chrome. Booking is not exposed as an agent tool.
