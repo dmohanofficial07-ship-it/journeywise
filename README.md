@@ -26,6 +26,20 @@ Working product name. The original private Sites URL is retained until a final b
 
 ## Run locally
 
+### Stakeholder prototype
+
+Open **http://127.0.0.1:4173/demo.html** for the standalone stakeholder walkthrough. It needs no account, provider credentials or paid API calls. The main app also links to it from the desktop navigation.
+
+- Try the value, arrival-time and group-trip scenarios, or change the four supported sample corridors and trip rules.
+- Compare illustrative ticket totals plus fixed group transfer estimates. Recommendations enforce the budget, same-day arrival deadline and sample confirmed seats.
+- Review a selected option and explicitly approve one simulation. Demo references begin with `DEMO-` and are never valid travel tickets.
+- Demo receipts exist only in page memory and clear on reload or **Reset demo**. They never enter the real account booking database.
+- Use **Presentation guide** for a three-minute walkthrough and an honest description of what remains to build.
+
+This page runs a deterministic rules engine in the browser. It does not use an AI model, actual traffic/address data, live availability, payment processing or background booking. All prices, schedules and transfer assumptions are examples. Development-app accounts and Duffel sandbox bookings remain separate.
+
+### Development app
+
 Use Node.js 24 for the local SQLite-backed server and scripts.
 
     npm ci
