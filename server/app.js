@@ -4,6 +4,8 @@ import {validateSearch,providerConfig,requireProvider,airports} from './query.js
 import {searchSampleFares} from '../public/engine.js';
 import {createDuffel} from './providers/duffel.js';
 import {signReference,verifyReference} from './offer-reference.js';
+import {requireAccount,authLinks} from './accounts.js';
+import {bookingStore} from './booking-store.js';
 const security={'Content-Type':'application/json; charset=utf-8','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'};
 function json(value,status=200,headers={}){return new Response(JSON.stringify(value),{status,headers:{...security,...headers}});}
 export function createApp({fetchImpl=fetch,now=()=>Date.now(),timeoutMs=18000,rateLimit=20,bookingTimeoutMs=45000}={}){
@@ -11,10 +13,16 @@ export function createApp({fetchImpl=fetch,now=()=>Date.now(),timeoutMs=18000,ra
   const buckets=new Map();
   function limit(request){const id=request.headers.get('CF-Connecting-IP')||'local';const time=now();for(const [key,bucket] of buckets)if(bucket.until<=time)buckets.delete(key);if(!buckets.has(id)){if(buckets.size>=10000)throw new ApiError(429,'RATE_LIMITED','Too many requests. Please wait a minute.');buckets.set(id,{count:0,until:time+60000});}if(++buckets.get(id).count>rateLimit)throw new ApiError(429,'RATE_LIMITED','Too many requests. Please wait a minute.');}
   async function reference(offer,query,env){return signReference({v:1,id:offer.id,query,mode:offer.dataMode,expires:Math.min(Date.parse(offer.expiresAt),now()+10*60000),totalMinor:offer.totalMinor,currency:offer.currency},env.OFFER_SIGNING_SECRET);}
-  return {async fetch(request,env={}){
+  return {async fetch(request,env={},identity={mode:'chatgpt',user:null}){
     const requestId=crypto.randomUUID();
     try{
       const url=new URL(request.url);
+      if(url.pathname==='/api/account'&&request.method==='GET')return json({...authLinks(identity.mode),user:identity.user?await requireAccount(identity,env,now()):null});
+      if(url.pathname==='/api/bookings/history'&&request.method==='GET'){
+        const account=await requireAccount(identity,env,now());
+        if([...url.searchParams.keys()].some(k=>k!=='cursor'))throw new ApiError(400,'INVALID_QUERY','Unexpected history filters.');
+        return json(await bookingStore(env.DB).list(account.id,url.searchParams.get('cursor')));
+      }
       if(url.pathname==='/api/health'&&request.method==='GET')return json({status:'ok',service:'travel-search',version:'0.2.0'});
       if(url.pathname==='/api/providers'&&request.method==='GET')return json({providers:[{id:'sample',name:'Illustrative samples',enabled:true,mode:'sample',bookingEnabled:false},{...providerConfig(env),sandboxBookingEnabled:sandboxBookingEnabled(env)}],airports,bookingEnabled:false,sandboxBookingEnabled:sandboxBookingEnabled(env)});
       if(!['/api/search','/api/offers/refresh','/api/bookings/prepare','/api/bookings/confirm','/api/bookings/status'].includes(url.pathname))throw new ApiError(404,'NOT_FOUND','This endpoint does not exist.');
@@ -22,7 +30,7 @@ export function createApp({fetchImpl=fetch,now=()=>Date.now(),timeoutMs=18000,ra
       if(request.headers.get('sec-fetch-site')==='cross-site'||(request.headers.get('origin')&&request.headers.get('origin')!==url.origin))throw new ApiError(403,'ORIGIN_NOT_ALLOWED','This request must come from the application.');
       if(request.headers.get('content-type')?.split(';')[0].trim()!=='application/json')throw new ApiError(415,'UNSUPPORTED_CONTENT_TYPE','Use application/json.');
       limit(request);const body=await readJson(request);
-      if(url.pathname.startsWith('/api/bookings/')){const service=createBookingService(env,{fetchImpl,now,timeoutMs:bookingTimeoutMs});const action=url.pathname.split('/').at(-1);const result=await service[action](body);return json({requestId,...result},result.status==='unknown'?202:200);}
+      if(url.pathname.startsWith('/api/bookings/')){const account=await requireAccount(identity,env,now());const service=createBookingService(env,{fetchImpl,now,timeoutMs:bookingTimeoutMs,account});const action=url.pathname.split('/').at(-1);const result=await service[action](body);return json({requestId,...result},result.status==='unknown'?202:200);}
       if(url.pathname==='/api/search'){
         const query=validateSearch(body,new Date(now()));const checkedAt=new Date(now()).toISOString();
         if(query.source==='sample'){const offers=searchSampleFares(query).map(o=>({...o,currency:'INR',totalMinor:o.total*100,dataMode:'sample',sourceProvider:'Sample data',checkedAt,expiresAt:null,bookingEnabled:false,priceComplete:true}));return json({requestId,query,dataMode:'sample',checkedAt,offers,providers:[{id:'sample',status:'ok',offerCount:offers.length}],excluded:{},warnings:['Illustrative fares and availability; no provider was contacted.']});}

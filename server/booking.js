@@ -36,8 +36,9 @@ function receipt(raw,p){
   const s=raw.slices[0].segments[0];if(!s.operating_carrier?.name||!s.origin?.iata_code||!s.destination?.iata_code||!s.departing_at||!s.arriving_at)return null;
   return {dataMode:'sandbox',orderId:raw.id,bookingReference:raw.booking_reference,total:Number(raw.total_amount),currency:raw.total_currency,travellers:p.query.travellers,itinerary:{from:s.origin.iata_code,to:s.destination.iata_code,departingAt:s.departing_at,arrivingAt:s.arriving_at,operatingCarrier:s.operating_carrier.name,flightNumber:[s.operating_carrier.iata_code,s.operating_carrier_flight_number].filter(Boolean).join(' ')},message:'Test booking only. No real ticket or payment.'};
 }
-export function createBookingService(env,{fetchImpl=fetch,now=()=>Date.now(),timeoutMs=45000}={}){
+export function createBookingService(env,{fetchImpl=fetch,now=()=>Date.now(),timeoutMs=45000,account}={}){
   const provider=createDuffel(env,{fetchImpl,now});const store=()=>bookingStore(env.DB);
+  function requireOwner(p){if(!account?.id)fail(401,'SIGN_IN_REQUIRED','Sign in to access your bookings.');if(p&&p.ownerId!==account.id)fail(404,'BOOKING_NOT_FOUND','Booking not found for this account.');}
   async function orderRequest(path,body){
     guard(env);const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
     try{const r=await fetchImpl('https://api.duffel.com'+path,{method:body?'POST':'GET',redirect:'error',headers:{Accept:'application/json','Content-Type':'application/json','Duffel-Version':'v2',Authorization:'Bearer '+env.DUFFEL_ACCESS_TOKEN},body:body?JSON.stringify({data:body}):undefined,signal:controller.signal});let data;try{data=await readJson(r,8*1024*1024)}catch{return {status:r.status,data:null}}return {status:r.status,data:data.data}}
@@ -54,27 +55,29 @@ export function createBookingService(env,{fetchImpl=fetch,now=()=>Date.now(),tim
   }
   return {
     async prepare(body){
+      requireOwner();
       guard(env);fields(body,['reference','passengers']);
       const previous=await verifyReference(body.reference,env.OFFER_SIGNING_SECRET,now());
       if(previous.mode!=='sandbox'||previous.query.source!=='duffel')fail(403,'SANDBOX_ONLY','Only sandbox flight offers can be booked.');
       const query=validateSearch(previous.query,new Date(now()));const passengers=validatePassengers(body.passengers,query);
       const {offer,raw}=await provider.bookingOffer(previous.id,query);
       if(raw.passenger_identity_documents_required)fail(409,'UNSUPPORTED_BOOKING','This offer requires identity documents. Choose another test offer.');
-      const p={v:1,purpose:'sandbox_booking',mode:'sandbox',id:offer.id,intent:crypto.randomUUID(),query,expires:Math.min(now()+5*60000,Date.parse(offer.expiresAt)),recoverUntil:now()+7*86400000,totalMinor:offer.totalMinor,currency:offer.currency,passengerHash:await digest(passengers),tripHash:await digest(trip(offer))};
+      const p={v:1,purpose:'sandbox_booking',mode:'sandbox',ownerId:account.id,id:offer.id,intent:crypto.randomUUID(),query,expires:Math.min(now()+5*60000,Date.parse(offer.expiresAt)),recoverUntil:now()+7*86400000,totalMinor:offer.totalMinor,currency:offer.currency,passengerHash:await digest(passengers),tripHash:await digest(trip(offer))};
       offer.reference=await signReference({v:1,id:offer.id,query,mode:'sandbox',expires:Date.parse(offer.expiresAt),totalMinor:offer.totalMinor,currency:offer.currency},env.OFFER_SIGNING_SECRET);
       return {checkoutToken:await signReference(p,env.OFFER_SIGNING_SECRET),offer,changed:previous.totalMinor!==offer.totalMinor||previous.currency!==offer.currency,expiresAt:new Date(p.expires).toISOString()};
     },
     async confirm(body){
+      requireOwner();
       guard(env);fields(body,['checkoutToken','passengers','confirmed']);
       if(body.confirmed!==true)fail(400,'CONFIRMATION_REQUIRED','Review and explicitly confirm the test booking.');
-      const p=await token(body.checkoutToken,env,now());const passengers=validatePassengers(body.passengers,p.query);
+      const p=await token(body.checkoutToken,env,now());requireOwner(p);const passengers=validatePassengers(body.passengers,p.query);
       if(await digest(passengers)!==p.passengerHash)fail(409,'PASSENGERS_CHANGED','Passenger details changed. Review the booking again.');
-      const existing=await store().get(p.intent);if(existing)return reconcile(existing,p);
+      const existing=await store().get(p.intent,account.id);if(existing)return reconcile(existing,p);
       if(p.expires<=now())fail(410,'CHECKOUT_EXPIRED','The review has expired. Review the latest quote again.');
       const {offer,raw}=await provider.bookingOffer(p.id,p.query);
       if(offer.totalMinor!==p.totalMinor||offer.currency!==p.currency||await digest(trip(offer))!==p.tripHash)fail(409,'QUOTE_CHANGED','The price, itinerary or fare conditions changed. Review the latest quote before confirming.');
       if(raw.passenger_identity_documents_required||raw.passengers.some(x=>typeof x.id!=='string'||!/^pas_[A-Za-z0-9]+$/.test(x.id)))fail(409,'UNSUPPORTED_BOOKING','This test offer cannot be booked in this flow.');
-      if(!await store().claim(p,now())){const row=await store().get(p.intent);if(row)return reconcile(row,p);fail(409,'OFFER_ALREADY_ATTEMPTED','A booking was already attempted for this offer. Check its existing status in Duffel.')}
+      if(!await store().claim(p,now())){const row=await store().get(p.intent,account.id);if(row)return reconcile(row,p);fail(409,'OFFER_ALREADY_ATTEMPTED','This offer cannot be submitted again. Check your booking history or search for a new offer.')}
       // Claim is durable before sending; never retry this POST, including after a restart.
       const response=await orderRequest('/air/orders',{type:'instant',selected_offers:[p.id],passengers:passengers.map((x,i)=>({...x,id:raw.passengers[i].id})),payments:[{type:'balance',currency:raw.total_currency,amount:raw.total_amount}],metadata:{rev_intent:p.intent}});
       const result=response.status>=200&&response.status<300?receipt(response.data,p):null;
@@ -83,7 +86,15 @@ export function createBookingService(env,{fetchImpl=fetch,now=()=>Date.now(),tim
       return {status:state,receipt:result,attemptId:p.intent};
     },
     async status(body){
-      guard(env);fields(body,['checkoutToken']);const p=await token(body.checkoutToken,env,now());const row=await store().get(p.intent);
+      requireOwner();fields(body,['checkoutToken','attemptId']);
+      if(Boolean(body.checkoutToken)===Boolean(body.attemptId))fail(400,'INVALID_BOOKING','Provide a booking reference or a review token.');
+      if(body.attemptId){
+        if(typeof body.attemptId!=='string'||! /^[a-f0-9-]{36}$/.test(body.attemptId))fail(404,'BOOKING_NOT_FOUND','Booking not found for this account.');
+        const row=await store().get(body.attemptId,account.id);
+        if(!row?.context)fail(404,'BOOKING_NOT_FOUND','Booking not found for this account.');
+        const p=JSON.parse(row.context);requireOwner(p);return reconcile(row,p);
+      }
+      const p=await token(body.checkoutToken,env,now());requireOwner(p);const row=await store().get(p.intent,account.id);
       return row?reconcile(row,p):{status:'not_submitted',receipt:null,attemptId:p.intent};
     }
   };

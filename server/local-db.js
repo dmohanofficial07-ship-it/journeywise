@@ -7,6 +7,7 @@ export async function openLocalDB(file){
   await fs.mkdir(path.dirname(file),{recursive:true});
   const db=new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
   db.exec('CREATE TABLE IF NOT EXISTS local_migrations (name TEXT PRIMARY KEY)');
   const names=(await fs.readdir(path.join(root,'drizzle'))).filter(n=>n.endsWith('.sql')).sort();
   for(const name of names){
@@ -16,11 +17,17 @@ export async function openLocalDB(file){
   }
   return {
     close:()=>db.close(),
+    async batch(statements){
+      db.exec('BEGIN');
+      try{const results=statements.map(s=>{const r=db.prepare(s.sql).run(...s.args);return {meta:{changes:Number(r.changes)}}});db.exec('COMMIT');return results}catch(e){db.exec('ROLLBACK');throw e}
+    },
     prepare(sql){
       return {
         bind(...args){
           return {
+            sql,args,
             async first(){return db.prepare(sql).get(...args)||null},
+            async all(){return {results:db.prepare(sql).all(...args)}},
             async run(){const r=db.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}}}
           };
         }

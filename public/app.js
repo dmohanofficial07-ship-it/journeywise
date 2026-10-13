@@ -1,4 +1,5 @@
 import {initBooking} from './booking.js';
+import {initAccounts} from './accounts.js';
 import {modes,modeNames,indiaToday,addDays,validateQuery,parseTrip,durationText,clockText} from './engine.js';
 const $=id=>document.getElementById(id);
 const paths={all:'M3 3h6v6H3z M15 3h6v6h-6z M3 15h6v6H3z M15 15h6v6h-6z',flight:'M22 2 9 15 M22 2l-8 20-4-8-8-4Z',train:'M6 3h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z M4 11h16 M9 3v8 M15 3v8 M7 15h1 M16 15h1 M7 19l-2 3 M17 19l2 3',bus:'M5 3h14a2 2 0 0 1 2 2v12H3V5a2 2 0 0 1 2-2Z M3 11h18 M8 3v8 M16 3v8 M6 14h1 M17 14h1 M5 17v4h3v-4 M16 17v4h3v-4',cab:'M4 10l2-6h12l2 6 M3 10h18v8H3Z M5 18v3h3v-3 M16 18v3h3v-3 M6 14h2 M16 14h2'};
@@ -8,7 +9,9 @@ const money=(n,currency='INR')=>new Intl.NumberFormat('en-IN',{style:'currency',
 let state={query:{from:'Bengaluru',to:'Chennai',date:addDays(indiaToday(),1),travellers:1},source:'sample',dataMode:'sample',mode:'all',sort:'price',confirmed:true,budget:0,currency:'INR',fares:[],warnings:[],loading:false,error:'',checkedAt:null};
 let providerInfo=null,sequence=0,controller=null;
 const dialog=$('details');
-const booking=initBooking({api,showDialog,dialog,esc,money,getFare:id=>state.fares.find(f=>f.id===id),getProvider:()=>providerInfo,onOffer:offer=>{state.fares=state.fares.map(f=>f.id===offer.id?offer:f);render()}});
+let booking;
+const accounts=initAccounts({api,esc,money,onUserChange:user=>booking?.setAccount(user),isBookingBusy:()=>booking?.isBusy()});
+booking=initBooking({api,showDialog,dialog,esc,money,ensureSignedIn:accounts.ensureSignedIn,getFare:id=>state.fares.find(f=>f.id===id),getProvider:()=>providerInfo,onOffer:offer=>{state.fares=state.fares.map(f=>f.id===offer.id?offer:f);render()}});
 function syncForm(){for(const key of ['from','to','date','travellers'])$(key).value=state.query[key];$('date').min=indiaToday();$('date').max=addDays(indiaToday(),330);$('data-source').value=state.source;}
 function isExpired(f){return f.expiresAt&&Date.parse(f.expiresAt)<=Date.now();}
 function eligible(mode=state.mode){return state.fares.filter(f=>f.currency===state.currency&&!isExpired(f)&&(mode==='all'||f.mode===mode)&&(state.source!=='sample'||!state.confirmed||f.status==='confirmed')&&(!state.budget||state.currency!=='INR'||f.total<=state.budget));}
@@ -64,7 +67,7 @@ async function search(query,source=state.source){
   }catch(e){if(run!==sequence)return {superseded:true};state.error=e.message;throw e;}finally{if(run===sequence){state.loading=false;render();}}
 }
 function showDialog(content){$('dialog-content').innerHTML=content;if(!dialog.open)dialog.showModal();dialog.scrollTop=0;const heading=$('dialog-content').querySelector('h2');if(heading){heading.tabIndex=-1;heading.focus();}}
-function showCoverage(){showDialog('<h2>Search coverage</h2><p class="dialog-subtitle">Project Rev is a working title for our travel product.</p><ul class="dialog-list"><li><strong>Sample mode:</strong> four illustrative routes across flights, trains, buses and cabs.</li><li><strong>Provider flights:</strong> one-way, nonstop economy searches for 1–6 adults between the seven cities in the form.</li><li>Duffel connection: '+esc(providerInfo?.enabled?providerInfo.mode+' configured':'not configured')+'. Configured access is not a guarantee of route coverage.</li><li>Quotes stay in their original currency and are compared only with the same currency.</li><li>Expired and structurally incomplete quotes are excluded.</li><li>Sandbox flight booking is available when configured. Real bookings, payments, accounts and background monitoring are not enabled.</li></ul><p class="dialog-note">A supplier quote is not a final checkout total. Extras, payment fees and transfers may apply. Refreshing an offer does not reserve a seat.</p>');}
+function showCoverage(){showDialog('<h2>Search coverage</h2><p class="dialog-subtitle">Project Rev is a working title for our travel product.</p><ul class="dialog-list"><li><strong>Sample mode:</strong> four illustrative routes across flights, trains, buses and cabs.</li><li><strong>Provider flights:</strong> one-way, nonstop economy searches for 1–6 adults between the seven cities in the form.</li><li>Duffel connection: '+esc(providerInfo?.enabled?providerInfo.mode+' configured':'not configured')+'. Configured access is not a guarantee of route coverage.</li><li>Quotes stay in their original currency and are compared only with the same currency.</li><li>Expired and structurally incomplete quotes are excluded.</li><li>Sandbox flight booking is available when configured. Sign in to book in test mode and view your booking history. Real bookings, payments and background monitoring are not enabled.</li></ul><p class="dialog-note">A supplier quote is not a final checkout total. Extras, payment fees and transfers may apply. Refreshing an offer does not reserve a seat.</p>');}
 function fareDetails(id,message=''){
   const f=state.fares.find(f=>f.id===id);if(!f)return;const sample=f.dataMode==='sample';
   let rows='';

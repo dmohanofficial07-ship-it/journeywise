@@ -1,10 +1,11 @@
-export function initBooking({api,showDialog,dialog,esc,money,getFare,getProvider,onOffer}){
+export function initBooking({api,showDialog,dialog,esc,money,getFare,getProvider,onOffer,ensureSignedIn}){
   const $=id=>document.getElementById(id);
   let flow=null,busy=false;
-  const recoveryKey='rev.sandbox.booking';
-  let recovery=null;try{recovery=sessionStorage.getItem(recoveryKey)}catch{}
-  function remember(token){recovery=token;try{sessionStorage.setItem(recoveryKey,token)}catch{}$('recover-booking').hidden=false}
-  function forget(){recovery=null;try{sessionStorage.removeItem(recoveryKey)}catch{}$('recover-booking').hidden=true}
+  let recoveryKey=null,accountGeneration=0;
+  let recovery=null;
+  function remember(token){recovery=token;try{if(recoveryKey)sessionStorage.setItem(recoveryKey,token)}catch{}$('recover-booking').hidden=false}
+  function forget(){recovery=null;try{if(recoveryKey)sessionStorage.removeItem(recoveryKey)}catch{}$('recover-booking').hidden=true}
+  function setAccount(user){accountGeneration++;flow=null;recoveryKey=user?'rev.sandbox.booking:'+user.id:null;recovery=null;try{if(recoveryKey)recovery=sessionStorage.getItem(recoveryKey)}catch{}$('recover-booking').hidden=!recovery;if(dialog.open)dialog.close();$('dialog-content').innerHTML='';}
   $('recover-booking').hidden=!recovery;
   function header(step){return '<span class="booking-tag">SANDBOX · NO REAL PAYMENT</span><h2>'+step+'</h2><p class="dialog-subtitle">Test passengers only. No card details are needed.</p>'}
   function itinerary(f){const arrivalDate=f.arrivingAt?.slice(0,10),departureDate=f.departingAt?.slice(0,10);return '<div class="booking-trip"><strong>'+esc(f.from)+' → '+esc(f.to)+'</strong><p>'+esc(f.date||departureDate)+' · '+esc(f.operatingCarrier||f.provider)+' · '+esc(f.flightNumber)+'</p><p>'+esc(f.departingAt?.slice(11,16))+' – '+esc(f.arrivingAt?.slice(11,16))+' IST'+(arrivalDate!==departureDate?' · arrives '+esc(arrivalDate):'')+' · '+f.travellers+' adult'+(f.travellers>1?'s':'')+'</p></div>'}
@@ -25,17 +26,17 @@ export function initBooking({api,showDialog,dialog,esc,money,getFare,getProvider
   }
   function lock(value){busy=value;$('close-dialog').disabled=value;dialog.querySelectorAll('form button,form input,form select,.booking-actions button').forEach(x=>x.disabled=value)}
   async function check(){
-    if(busy||!recovery)return;lock(true);
-    try{const data=await api('/api/bookings/status',{checkoutToken:recovery});outcome(data)}
-    catch(e){const message=$('booking-message');if(message)message.textContent=e.message;else showDialog(header('Booking status unavailable')+'<p role="alert">'+esc(e.message)+'</p><button class="primary" id="check-booking-status">Check again</button><p id="booking-message" role="alert"></p>')}
+    if(busy||!recovery)return;lock(true);const run=accountGeneration;
+    try{const data=await api('/api/bookings/status',{checkoutToken:recovery});if(run===accountGeneration)outcome(data)}
+    catch(e){if(run!==accountGeneration)return;if(e.code==='BOOKING_NOT_FOUND'){forget();showDialog('<h2>Booking unavailable</h2><p>This booking is not linked to your account. Check My bookings for your saved journeys.</p>');return}const message=$('booking-message');if(message)message.textContent=e.message;else showDialog(header('Booking status unavailable')+'<p role="alert">'+esc(e.message)+'</p><button class="primary" id="check-booking-status">Check again</button><p id="booking-message" role="alert"></p>')}
     finally{lock(false)}
   }
   $('recover-booking').addEventListener('click',check);
   dialog.addEventListener('cancel',e=>{if(busy)e.preventDefault()});
   dialog.addEventListener('close',()=>{if(!busy)flow=null});
-  $('dialog-content').addEventListener('click',e=>{
+  $('dialog-content').addEventListener('click',async e=>{
     if(busy)return;
-    if(e.target.id==='start-test-booking'){if(recovery){check();return}const offer=getFare(e.target.dataset.id);if(!offer||offer.dataMode!=='sandbox'||!getProvider()?.sandboxBookingEnabled)return;flow={offer,passengers:null};passengerForm()}
+    if(e.target.id==='start-test-booking'){const id=e.target.dataset.id;if(!await ensureSignedIn())return;if(recovery){check();return}const offer=getFare(id);if(!offer||offer.dataMode!=='sandbox'||!getProvider()?.sandboxBookingEnabled)return;flow={offer,passengers:null};passengerForm()}
     if(e.target.id==='fill-test-passengers'){flow.passengers=Array.from({length:flow.offer.travellers},(_,i)=>({title:'ms',gender:'f',given_name:'Test',family_name:['Travellerone','Travellertwo','Travellerthree','Travellerfour','Travellerfive','Travellersix'][i],born_on:'1990-01-01',email:'traveller'+(i+1)+'@example.com',phone_number:'+1202555010'+i}));passengerForm()}
     if(e.target.id==='edit-passengers')passengerForm();
     if(e.target.id==='booking-done'){forget();dialog.close()}
@@ -43,18 +44,20 @@ export function initBooking({api,showDialog,dialog,esc,money,getFare,getProvider
   });
   $('dialog-content').addEventListener('submit',async e=>{
     if(!['passenger-form','confirm-booking-form'].includes(e.target.id))return;e.preventDefault();if(busy)return;
+    const run=accountGeneration;
     if(e.target.id==='passenger-form'){
       flow.passengers=readPassengers(e.target);lock(true);$('booking-message').textContent='Checking the latest price…';
-      try{const data=await api('/api/bookings/prepare',{reference:flow.offer.reference,passengers:flow.passengers});flow={...flow,...data};onOffer(data.offer);review()}
-      catch(err){$('booking-message').textContent=err.message}finally{lock(false)}return;
+      try{const data=await api('/api/bookings/prepare',{reference:flow.offer.reference,passengers:flow.passengers});if(run!==accountGeneration)return;flow={...flow,...data};onOffer(data.offer);review()}
+      catch(err){if(run===accountGeneration)$('booking-message').textContent=err.message}finally{lock(false)}return;
     }
     remember(flow.checkoutToken);lock(true);$('booking-message').textContent='Creating your test booking. Please keep this window open…';
-    try{const data=await api('/api/bookings/confirm',{checkoutToken:flow.checkoutToken,passengers:flow.passengers,confirmed:true});outcome(data)}
+    try{const data=await api('/api/bookings/confirm',{checkoutToken:flow.checkoutToken,passengers:flow.passengers,confirmed:true});if(run===accountGeneration)outcome(data)}
     catch(err){
+      if(run!==accountGeneration)return;
       if(['QUOTE_CHANGED','CHECKOUT_EXPIRED','PASSENGERS_CHANGED'].includes(err.code)){forget();passengerForm(err.message)}
-      else if(err.code&&['SANDBOX_BOOKING_DISABLED','INVALID_PASSENGERS','INVALID_CHECKOUT','CONFIRMATION_REQUIRED','UNSUPPORTED_BOOKING','OFFER_UNAVAILABLE','OFFER_EXPIRED'].includes(err.code)){$('booking-message').textContent=err.message}
+      else if(err.code&&['SIGN_IN_REQUIRED','BOOKING_NOT_FOUND','SANDBOX_BOOKING_DISABLED','INVALID_PASSENGERS','INVALID_CHECKOUT','CONFIRMATION_REQUIRED','UNSUPPORTED_BOOKING','OFFER_UNAVAILABLE','OFFER_EXPIRED'].includes(err.code)){$('booking-message').textContent=err.message}
       else outcome({status:'unknown'});
     }finally{lock(false)}
   });
-  return {isBusy:()=>busy};
+  return {isBusy:()=>busy,setAccount};
 }
