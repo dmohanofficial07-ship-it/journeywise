@@ -1,6 +1,74 @@
-# Project Rev — accounts and sandbox flight booking
+# Journeywise
 
-Working product name. The original private Sites URL is retained until a final brand is chosen.
+**One destination. More ways to get there.**
+
+An India-first travel comparison prototype exploring how travellers can choose a journey by total cost, arrival time and personal preferences. Compare flights, trains, buses and cabs, understand the recommendation, and review the rules before approving a simulated booking.
+
+The repository is named **Journeywise**. The current interface still uses **Project Rev**, its working product name.
+
+[Visual walkthrough](#visual-walkthrough) · [Run locally](#run-locally) · [What works now](#what-works-now) · [HTTP API](#http-api)
+
+> **Project stage: stakeholder prototype.** The demo uses illustrative fares and a rules engine, not live inventory or an AI model. The separate development app supports accounts and Duffel sandbox bookings. No real tickets or customer payments are enabled.
+
+## Visual walkthrough
+
+These screenshots were captured from the running stakeholder demo. All fares, providers, schedules and confirmations shown below are examples. No customer information appears in the screenshots.
+
+### 1. Start with the whole journey
+
+![Journeywise prototype landing page, showing the travel concept and four transport modes](docs/screenshots/journey-overview.png)
+
+**The idea:** help travellers compare more than the ticket price. The prototype brings the journey from the traveller's door to the destination into one decision, with flights, trains, buses and cabs as possible options. The built-in **Presentation guide** provides a three-minute stakeholder walkthrough.
+
+### 2. Compare options against your priorities
+
+![Journey comparison with a group budget, arrival deadline, recommendation and sample fare options](docs/screenshots/journey-comparison.png)
+
+**How it works:** choose a route, date, group size, budget and arrival deadline. The demo ranks eligible options by either estimated total cost or whole-journey time, explains the recommendation, and lists why other options were excluded. Ticket totals include fixed demo transfer estimates; these are not actual traffic or transfer quotes. If nothing meets the rules, the app shows no recommendation.
+
+### 3. Review before approving
+
+<img src="docs/screenshots/booking-review.png" alt="Booking review showing the sample cost breakdown, spending limit, arrival deadline and required approval checkbox" width="580">
+
+**The traveller stays in control:** the review shows the selected journey, estimated group total and booking rules. Approval is required for one simulation of that journey. This demonstrates the intended consent flow; it does not activate background monitoring, recurring permission or automatic purchases.
+
+### 4. See the outcome clearly
+
+<img src="docs/screenshots/demo-confirmation.png" alt="Simulated confirmation with a DEMO reference and an explicit notice that no ticket or payment was created" width="580">
+
+**After approval:** the demo generates a reference beginning with `DEMO-` and adds the result to its page-session history. The confirmation explicitly states that it is not a travel ticket and nothing was charged. Reloading the page or selecting **Reset demo** clears these simulated receipts.
+
+### 5. Explore on mobile
+
+<img src="docs/screenshots/mobile-preview.png" alt="Mobile layout of the travel prototype with its introduction, journey illustration and sample-data disclosure" width="320">
+
+**Designed for smaller screens:** the layout stacks the planner, comparison results and review flow for mobile use. Browser checks covered widths of 390 px and 320 px, including the booking review dialog.
+
+## Try the prototype
+
+After starting the app locally, open **http://127.0.0.1:4173/demo.html**. No account or travel API credentials are needed for this walkthrough.
+
+1. Choose **Bengaluru → Chennai** to compare estimated group costs.
+2. Change the priority to **Shortest whole journey** and see the recommendation change.
+3. Lower the budget to **₹500** to demonstrate that the app respects the spending limit.
+4. Restore the budget, review an option and approve a simulated booking.
+5. Open the demo history, then reset for the next presentation.
+
+The [hosted prototype](https://farewise-india-mohan.mohand21012003.chatgpt.site/demo.html) currently requires the owner's access. The GitHub repository is public; hosted-site access is separate.
+
+## Technology at a glance
+
+| Layer | Current implementation |
+| --- | --- |
+| Interface | HTML, CSS and JavaScript modules; responsive layouts |
+| Demo recommendations | Deterministic budget, arrival-time and seat rules |
+| Local backend | Node.js 24 with SQLite |
+| Hosted backend | Cloudflare-compatible Worker with D1 storage |
+| Flight integration | Duffel search, quote refresh and sandbox booking |
+| Accounts | Local test accounts; ChatGPT sign-in on the hosted site |
+| Validation | 48 automated tests; 15 stakeholder-demo browser checks at this milestone |
+
+Live multi-provider inventory, an AI assistant, real payments and autonomous booking remain future milestones. The screenshots demonstrate the current prototype, not those planned capabilities.
 
 ## What works now
 
